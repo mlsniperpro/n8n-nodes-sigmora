@@ -1,0 +1,152 @@
+{
+  "name": "Sigmora — import and start footage edit",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Run workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "resource": "asset",
+        "operation": "import",
+        "projectId": "prj_replace_me",
+        "sourceUrl": "https://cdn.example.com/recording.mp4",
+        "platform": "youtube",
+        "idempotencyKey": "={{'import:' + $execution.id}}"
+      },
+      "id": "sigmora-import",
+      "name": "Import media",
+      "type": "n8n-nodes-sigmora.sigmora",
+      "typeVersion": 1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "asset-ready-condition",
+              "leftValue": "={{$json.ready === true || ($json.status === 'ready' && $json.ingestStatus === 'active')}}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "asset-ready",
+      "name": "Asset ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "asset-retryable-condition",
+              "leftValue": "={{$json.retryable === true || $json.status === 'processing' || $json.ingestStatus === 'pending'}}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "asset-retryable",
+      "name": "Asset still processing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [700, 120]
+    },
+    {
+      "parameters": { "amount": 30, "unit": "seconds" },
+      "id": "wait-for-ingest",
+      "name": "Wait for ingest",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [920, 80]
+    },
+    {
+      "parameters": {
+        "resource": "asset",
+        "operation": "getStatus",
+        "projectId": "={{$('Import media').item.json.projectId}}",
+        "assetId": "={{$('Import media').item.json.id}}"
+      },
+      "id": "sigmora-ingest-status",
+      "name": "Get ingest status",
+      "type": "n8n-nodes-sigmora.sigmora",
+      "typeVersion": 1,
+      "position": [1140, 80]
+    },
+    {
+      "parameters": {
+        "errorMessage": "Sigmora could not make the imported asset ready for editing."
+      },
+      "id": "ingest-failed",
+      "name": "Stop on ingest failure",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [920, 240]
+    },
+    {
+      "parameters": {
+        "resource": "job",
+        "operation": "startEdit",
+        "projectId": "={{$json.projectId}}",
+        "shootId": "={{$('Import media').item.json.id}}",
+        "clipIds": "={{$json.contentId}}",
+        "title": "={{$('Import media').item.json.title}}",
+        "makeLong": true,
+        "shortsCount": 0,
+        "reviewCuts": false,
+        "idempotencyKey": "={{'edit:' + $('Import media').item.json.id}}"
+      },
+      "id": "sigmora-edit",
+      "name": "Start footage edit",
+      "type": "n8n-nodes-sigmora.sigmora",
+      "typeVersion": 1,
+      "position": [700, -80]
+    }
+  ],
+  "connections": {
+    "Run workflow": { "main": [[{ "node": "Import media", "type": "main", "index": 0 }]] },
+    "Import media": { "main": [[{ "node": "Asset ready?", "type": "main", "index": 0 }]] },
+    "Asset ready?": {
+      "main": [
+        [{ "node": "Start footage edit", "type": "main", "index": 0 }],
+        [{ "node": "Asset still processing?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Asset still processing?": {
+      "main": [
+        [{ "node": "Wait for ingest", "type": "main", "index": 0 }],
+        [{ "node": "Stop on ingest failure", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait for ingest": { "main": [[{ "node": "Get ingest status", "type": "main", "index": 0 }]] },
+    "Get ingest status": { "main": [[{ "node": "Asset ready?", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {}
+}

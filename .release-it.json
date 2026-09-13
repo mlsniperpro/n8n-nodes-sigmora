@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/release-it/schema/release-it.json",
+  "git": {
+    "tagName": "n8n-v${version}",
+    "tagMatch": "n8n-v*"
+  }
+}
