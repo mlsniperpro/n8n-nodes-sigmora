@@ -1,0 +1,30 @@
+{
+  "name": "Sigmora — continue when an artifact is ready",
+  "nodes": [
+    {
+      "parameters": { "events": ["artifact.ready"] },
+      "id": "sigmora-trigger",
+      "name": "Artifact ready",
+      "type": "n8n-nodes-sigmora.sigmoraTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "resource": "job",
+        "operation": "getArtifact",
+        "jobId": "={{$json.data.jobId}}"
+      },
+      "id": "sigmora-artifact",
+      "name": "Get artifact URLs",
+      "type": "n8n-nodes-sigmora.sigmora",
+      "typeVersion": 1,
+      "position": [280, 0]
+    }
+  ],
+  "connections": {
+    "Artifact ready": { "main": [[{ "node": "Get artifact URLs", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {}
+}
