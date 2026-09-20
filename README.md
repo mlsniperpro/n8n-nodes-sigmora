@@ -16,9 +16,12 @@ media-analysis jobs created in Sigmora. `artifact.ready` is footage-edit only.
 render job ID that must be followed with **Get Job** polling; it does not produce
 Sigmora Trigger events yet. A webhook's `data.resourceUrl` points to the job API
 resource. Use **Get Artifact URLs** to resolve its playback and download URLs.
-Publishing completion/failure events come from Sigmora's existing publishing
-rail. The node does not start a generic publish because that public action
-endpoint is not available yet.
+The **Workflow** resource creates immutable context snapshots, discovers approved
+recipes, creates version-pinned proposals, and approves, rejects, cancels, or
+retrieves them. **Get Workflow Run** exposes durable execution state.
+**Export Transcript** and **Publish Artifact** are separate resources; publishing
+remains subject to Sigmora destination and approval policy. Publishing
+completion/failure events continue to arrive through the signed trigger.
 
 An import returns a project asset `id` and a media `contentId`. If it is still
 processing, use **Get Ingest Status** with the project asset ID until `ready` is true;
@@ -79,6 +82,6 @@ only as a fallback when trusted publishing is unavailable. Run a live
 subscription smoke test with a workspace API key before Creator Portal
 submission.
 
-The nodes intentionally omit context snapshots, workflow recipes, generic
-approval, transcript export, publishing, and arbitrary API requests until those
-operations have stable public endpoints.
+The nodes intentionally omit an arbitrary API-request escape hatch. Typed
+operations preserve Sigmora's source scope validation, idempotency, proposal
+approval, and publishing policy boundary.

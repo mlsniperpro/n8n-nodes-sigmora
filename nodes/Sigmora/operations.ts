@@ -15,12 +15,34 @@ export type OperationKey =
 	| 'job.list'
 	| 'job.cancel'
 	| 'job.getArtifact'
-	| 'capability.list';
+	| 'capability.list'
+	| 'workflow.createContextSnapshot'
+	| 'workflow.findRecipe'
+	| 'workflow.createProposal'
+	| 'workflow.approveProposal'
+	| 'workflow.rejectProposal'
+	| 'workflow.cancelProposal'
+	| 'workflow.getProposal'
+	| 'workflow.getRun'
+	| 'asset.exportTranscript'
+	| 'publish.artifact';
 
 function requireIdempotencyKey(value: unknown): string {
 	const key = String(value ?? '');
 	if (!key || key.length > 255) throw new Error('Idempotency Key must be between 1 and 255 characters.');
 	return key;
+}
+
+function jsonValue(value: unknown, field: string): IDataObject | IDataObject[] {
+	if (value && typeof value === 'object') return value as IDataObject | IDataObject[];
+	if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} must be valid JSON.`);
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (!parsed || typeof parsed !== 'object') throw new Error('not_object');
+		return parsed as IDataObject | IDataObject[];
+	} catch {
+		throw new Error(`${field} must be valid JSON.`);
+	}
 }
 
 export function buildRequest(key: OperationKey, parameters: IDataObject): RequestSpec {
@@ -130,6 +152,84 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			};
 		case 'capability.list':
 			return { method: 'GET', path: '/v1/capabilities' };
+		case 'workflow.createContextSnapshot':
+			return {
+				method: 'POST',
+				path: '/v1/workflow/context-snapshots',
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				body: {
+					projectId: parameters.projectId,
+					scope: jsonValue(parameters.scopeJson, 'Scope'),
+					purpose: parameters.purpose,
+					audience: parameters.audience,
+					sources: jsonValue(parameters.sourcesJson, 'Authorized Sources'),
+					retrievedPassages: parameters.retrievedPassagesJson
+						? jsonValue(parameters.retrievedPassagesJson, 'Retrieved Passages')
+						: [],
+					exclusions: parameters.exclusionsJson ? jsonValue(parameters.exclusionsJson, 'Exclusions') : [],
+					policyVersion: parameters.policyVersion,
+					retentionMode: parameters.retentionMode,
+				},
+			};
+		case 'workflow.findRecipe': {
+			const recipeId = String(parameters.recipeId ?? '').trim();
+			return recipeId
+				? { method: 'GET', path: `/v1/workflow/recipes/${encodeURIComponent(recipeId)}` }
+				: { method: 'GET', path: '/v1/workflow/recipes', qs: { limit: 100 } };
+		}
+		case 'workflow.createProposal':
+			return {
+				method: 'POST',
+				path: '/v1/workflow/proposals',
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				body: {
+					projectId: parameters.projectId,
+					snapshotId: parameters.snapshotId,
+					recipeId: parameters.recipeId,
+					recipeVersion: parameters.recipeVersion,
+					execution: jsonValue(parameters.executionJson, 'Execution'),
+					usageEstimate: jsonValue(parameters.usageEstimateJson, 'Usage Estimate'),
+					publishDestinationId: parameters.publishDestinationId,
+					expiresAt: parameters.expiresAt,
+				},
+			};
+		case 'workflow.approveProposal':
+		case 'workflow.rejectProposal':
+		case 'workflow.cancelProposal': {
+			const operation = key === 'workflow.approveProposal'
+				? 'approve'
+				: key === 'workflow.rejectProposal'
+					? 'reject'
+					: 'cancel';
+			return {
+				method: 'POST',
+				path: `/v1/workflow/proposals/${encodeURIComponent(String(parameters.proposalId))}/${operation}`,
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				body: {},
+			};
+		}
+		case 'workflow.getProposal':
+			return { method: 'GET', path: `/v1/workflow/proposals/${encodeURIComponent(String(parameters.proposalId))}` };
+		case 'workflow.getRun':
+			return { method: 'GET', path: `/v1/workflow/runs/${encodeURIComponent(String(parameters.runId))}` };
+		case 'asset.exportTranscript':
+			return {
+				method: 'GET',
+				path: `/v1/assets/${encodeURIComponent(String(parameters.assetId))}/transcript`,
+				qs: { projectId: parameters.projectId, limit: parameters.limit, after: parameters.after },
+			};
+		case 'publish.artifact':
+			return {
+				method: 'POST',
+				path: '/v1/publish',
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				body: {
+					videoJobId: parameters.videoJobId,
+					connectedAccountId: parameters.connectedAccountId,
+					caption: parameters.caption,
+					scheduledAt: parameters.scheduledAt,
+				},
+			};
 	}
 }
 
@@ -180,6 +280,34 @@ export function transformResponse(
 		}
 		case 'capability.list':
 			return (response.capabilities as IDataObject[]) ?? [];
+		case 'workflow.createContextSnapshot':
+			return [response.contextSnapshot as IDataObject];
+		case 'workflow.findRecipe': {
+			if (response.recipe) return [response.recipe as IDataObject];
+			const exactTitle = String(parameters.exactTitle ?? '');
+			if (!exactTitle) throw new Error('Enter either Workflow Recipe ID or Exact Title.');
+			const match = ((response.recipes as IDataObject[]) ?? []).find(
+				(recipe) => recipe.title === exactTitle,
+			);
+			return match ? [match] : [];
+		}
+		case 'workflow.createProposal':
+		case 'workflow.rejectProposal':
+		case 'workflow.cancelProposal':
+			return [response.proposal as IDataObject];
+		case 'workflow.approveProposal':
+			return [{
+				...(response.proposal as IDataObject),
+				runId: (response.run as IDataObject | undefined)?.id ?? null,
+				provenanceManifestId: (response.provenanceManifest as IDataObject | undefined)?.id ?? null,
+			}];
+		case 'workflow.getProposal':
+			return [response.proposal as IDataObject];
+		case 'workflow.getRun':
+			return [response.run as IDataObject];
+		case 'asset.exportTranscript':
+		case 'publish.artifact':
+			return [response];
 	}
 }
 
