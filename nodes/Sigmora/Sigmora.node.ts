@@ -107,17 +107,21 @@ export class Sigmora implements INodeType {
 				const operation = this.getNodeParameter('operation', index) as string;
 				const key = `${resource}.${operation}` as OperationKey;
 				const parameters = parametersForItem(this, index);
-					const results =
-						key === 'job.list'
-							? await collectJobPages(parameters, async (spec) =>
-									sigmoraApiRequest.call(this, spec),
-								)
-							: transformResponse(
-									key,
-									await sigmoraApiRequest.call(this, buildRequest(key, parameters)),
-									parameters,
-								);
-					for (const json of results) {
+				const node = this.getNode();
+				const results =
+					key === 'job.list'
+						? await collectJobPages(
+								parameters,
+								async (spec) => sigmoraApiRequest.call(this, spec),
+								node,
+							)
+						: transformResponse(
+								key,
+								await sigmoraApiRequest.call(this, buildRequest(key, parameters, node)),
+								parameters,
+								node,
+							);
+				for (const json of results) {
 					output.push({ json, pairedItem: { item: index } });
 				}
 			} catch (error) {

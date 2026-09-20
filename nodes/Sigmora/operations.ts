@@ -1,4 +1,5 @@
-import type { IDataObject } from 'n8n-workflow';
+import type { IDataObject, INode } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
 import type { RequestSpec } from './transport';
 import { splitIds } from './transport';
@@ -27,31 +28,49 @@ export type OperationKey =
 	| 'asset.exportTranscript'
 	| 'publish.artifact';
 
-function requireIdempotencyKey(value: unknown): string {
+// Unit-level request builders do not have a workflow node context. The live
+// node always supplies its actual node, while this minimal descriptor keeps
+// validation errors structured in direct connector tests as well.
+const standaloneNode: INode = {
+	id: 'sigmora-request-builder',
+	name: 'Sigmora',
+	type: 'sigmora',
+	typeVersion: 1,
+	position: [0, 0],
+	parameters: {},
+};
+
+function invalidRequest(node: INode | undefined, message: string): never {
+	throw new NodeOperationError(node ?? standaloneNode, message);
+}
+
+function requireIdempotencyKey(value: unknown, node?: INode): string {
 	const key = String(value ?? '');
-	if (!key || key.length > 255) throw new Error('Idempotency Key must be between 1 and 255 characters.');
+	if (!key || key.length > 255) {
+		return invalidRequest(node, 'Idempotency Key must be between 1 and 255 characters.');
+	}
 	return key;
 }
 
-function jsonValue(value: unknown, field: string): IDataObject | IDataObject[] {
+function jsonValue(value: unknown, field: string, node?: INode): IDataObject | IDataObject[] {
 	if (value && typeof value === 'object') return value as IDataObject | IDataObject[];
-	if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} must be valid JSON.`);
+	if (typeof value !== 'string' || !value.trim()) return invalidRequest(node, `${field} must be valid JSON.`);
 	try {
 		const parsed = JSON.parse(value) as unknown;
-		if (!parsed || typeof parsed !== 'object') throw new Error('not_object');
+		if (!parsed || typeof parsed !== 'object') return invalidRequest(node, `${field} must be valid JSON.`);
 		return parsed as IDataObject | IDataObject[];
 	} catch {
-		throw new Error(`${field} must be valid JSON.`);
+		return invalidRequest(node, `${field} must be valid JSON.`);
 	}
 }
 
-export function buildRequest(key: OperationKey, parameters: IDataObject): RequestSpec {
+export function buildRequest(key: OperationKey, parameters: IDataObject, node?: INode): RequestSpec {
 	switch (key) {
 		case 'project.create':
 			return {
 				method: 'POST',
 				path: '/v1/projects',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					title: parameters.title,
 					mediaType: parameters.mediaType,
@@ -69,7 +88,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/assets/import',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
 					sourceUrl: parameters.sourceUrl,
@@ -87,7 +106,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/video/edit',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
 					shootId: parameters.shootId,
@@ -105,7 +124,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/video/edit/approve',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
 					parentJobId: parameters.parentJobId,
@@ -116,7 +135,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/video/render',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
 					story: parameters.story,
@@ -147,7 +166,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: `/v1/jobs/${encodeURIComponent(String(parameters.jobId))}/cancel`,
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: { reason: parameters.reason },
 			};
 		case 'capability.list':
@@ -156,17 +175,17 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/workflow/context-snapshots',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
-					scope: jsonValue(parameters.scopeJson, 'Scope'),
+					scope: jsonValue(parameters.scopeJson, 'Scope', node),
 					purpose: parameters.purpose,
 					audience: parameters.audience,
-					sources: jsonValue(parameters.sourcesJson, 'Authorized Sources'),
+					sources: jsonValue(parameters.sourcesJson, 'Authorized Sources', node),
 					retrievedPassages: parameters.retrievedPassagesJson
-						? jsonValue(parameters.retrievedPassagesJson, 'Retrieved Passages')
+						? jsonValue(parameters.retrievedPassagesJson, 'Retrieved Passages', node)
 						: [],
-					exclusions: parameters.exclusionsJson ? jsonValue(parameters.exclusionsJson, 'Exclusions') : [],
+					exclusions: parameters.exclusionsJson ? jsonValue(parameters.exclusionsJson, 'Exclusions', node) : [],
 					policyVersion: parameters.policyVersion,
 					retentionMode: parameters.retentionMode,
 				},
@@ -181,14 +200,14 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/workflow/proposals',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					projectId: parameters.projectId,
 					snapshotId: parameters.snapshotId,
 					recipeId: parameters.recipeId,
 					recipeVersion: parameters.recipeVersion,
-					execution: jsonValue(parameters.executionJson, 'Execution'),
-					usageEstimate: jsonValue(parameters.usageEstimateJson, 'Usage Estimate'),
+					execution: jsonValue(parameters.executionJson, 'Execution', node),
+					usageEstimate: jsonValue(parameters.usageEstimateJson, 'Usage Estimate', node),
 					publishDestinationId: parameters.publishDestinationId,
 					expiresAt: parameters.expiresAt,
 				},
@@ -204,7 +223,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: `/v1/workflow/proposals/${encodeURIComponent(String(parameters.proposalId))}/${operation}`,
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {},
 			};
 		}
@@ -222,7 +241,7 @@ export function buildRequest(key: OperationKey, parameters: IDataObject): Reques
 			return {
 				method: 'POST',
 				path: '/v1/publish',
-				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey),
+				idempotencyKey: requireIdempotencyKey(parameters.idempotencyKey, node),
 				body: {
 					videoJobId: parameters.videoJobId,
 					connectedAccountId: parameters.connectedAccountId,
@@ -237,6 +256,7 @@ export function transformResponse(
 	key: OperationKey,
 	response: IDataObject,
 	parameters: IDataObject,
+	node?: INode,
 ): IDataObject[] {
 	switch (key) {
 		case 'project.create':
@@ -244,7 +264,7 @@ export function transformResponse(
 		case 'project.find': {
 			if (response.project) return [response.project as IDataObject];
 			const exactTitle = String(parameters.exactTitle ?? '');
-			if (!exactTitle) throw new Error('Enter either Project ID or Exact Title.');
+			if (!exactTitle) return invalidRequest(node, 'Enter either Project ID or Exact Title.');
 			const match = ((response.projects as IDataObject[]) ?? []).find(
 				(project) => project.title === exactTitle,
 			);
@@ -285,7 +305,7 @@ export function transformResponse(
 		case 'workflow.findRecipe': {
 			if (response.recipe) return [response.recipe as IDataObject];
 			const exactTitle = String(parameters.exactTitle ?? '');
-			if (!exactTitle) throw new Error('Enter either Workflow Recipe ID or Exact Title.');
+			if (!exactTitle) return invalidRequest(node, 'Enter either Workflow Recipe ID or Exact Title.');
 			const match = ((response.recipes as IDataObject[]) ?? []).find(
 				(recipe) => recipe.title === exactTitle,
 			);
@@ -327,6 +347,7 @@ export function normalizeVideoEditResponse(response: IDataObject): IDataObject {
 export async function collectJobPages(
 	parameters: IDataObject,
 	request: (spec: RequestSpec) => Promise<IDataObject>,
+	node?: INode,
 ): Promise<IDataObject[]> {
 	const requestedLimit = Math.max(1, Math.min(100, Number(parameters.limit) || 50));
 	const jobs: IDataObject[] = [];
@@ -339,7 +360,7 @@ export async function collectJobPages(
 				...parameters,
 				limit: requestedLimit - jobs.length,
 				cursor,
-			}),
+			}, node),
 		);
 		jobs.push(...((response.jobs as IDataObject[] | undefined) ?? []));
 		const nextCursor = typeof response.nextCursor === 'string' ? response.nextCursor : '';
