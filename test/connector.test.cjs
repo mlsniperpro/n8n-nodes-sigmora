@@ -251,7 +251,83 @@ test('release tags and the package repository point at the public n8n mirror', (
   assert.match(workflow, /- "n8n-v\*\.\*\.\*"/);
   assert.match(workflow, /const expectedTag = `n8n-v\$\{packageJson\.version\}`/);
   assert.match(workflow, /id-token: write/);
-  assert.match(workflow, /npm run release/);
+});
+
+// Splits a workflow into its jobs and each job into its steps, by indentation
+// (the repository adds no YAML dependency for this).
+function workflowJobs(text) {
+  const body = text.slice(text.indexOf('\njobs:\n') + 7);
+  const jobs = {};
+  for (const block of body.split(/^(?= {2}[A-Za-z][\w-]*:\n)/m)) {
+    const name = block.match(/^ {2}([A-Za-z][\w-]*):\n/)?.[1];
+    if (!name) continue;
+    const stepsAt = block.indexOf('\n    steps:\n');
+    jobs[name] = {
+      head: stepsAt === -1 ? block : block.slice(0, stepsAt),
+      steps: stepsAt === -1 ? [] : block.slice(stepsAt).split(/^ {6}- /m).slice(1),
+    };
+  }
+  return jobs;
+}
+
+test('the mirror publish runs no unlocked install and no dependency code beside publish credentials', () => {
+  const workflow = readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'), 'utf8');
+  const jobs = workflowJobs(workflow);
+  // Workflow-level permissions grant no OIDC token; only the publish job does.
+  assert.match(workflow, /^permissions:\n {2}contents: read\n/m);
+  assert.doesNotMatch(workflow, /npm install|npm i\b|npm run release/);
+
+  const credentialed = Object.entries(jobs).filter(([, job]) => /id-token: write/.test(job.head));
+  assert.deepEqual(credentialed.map(([name]) => name), ['publish']);
+  for (const [name, job] of Object.entries(jobs)) {
+    if (name === 'publish') continue;
+    assert.doesNotMatch(job.head + job.steps.join(''), /id-token|NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./, name);
+  }
+
+  const build = jobs.build.steps.join('');
+  assert.match(build, /run: npm ci --ignore-scripts/);
+  const order = ['npm ci --ignore-scripts', 'npm run lint', 'npm run build', 'npm pack --ignore-scripts'].map((command) =>
+    build.indexOf(command),
+  );
+  assert.ok(order.every((at, index) => at !== -1 && (index === 0 || at > order[index - 1])), `build order ${order}`);
+  assert.match(jobs.publish.head, /needs: build/);
+
+  // The publish job installs nothing and runs no package script: it publishes
+  // the tarball the unprivileged build job packed, and the npm token exists
+  // only in its final step.
+  const publish = jobs.publish.steps;
+  assert.doesNotMatch(publish.join(''), /npm ci|npm run|npm test|actions\/checkout/);
+  const tokenSteps = publish.filter((step) => /NPM_TOKEN/.test(step));
+  assert.deepEqual(tokenSteps, [publish.at(-1)]);
+  assert.match(publish.at(-1), /npm publish "\$tarball" --provenance --access public --ignore-scripts/);
+  for (const uses of workflow.match(/uses: \S+/g) ?? []) assert.match(uses, /@[0-9a-f]{40}$/, `${uses} must pin a commit`);
+});
+
+test('the committed npm lockfile is fresh for package.json and resolves only from the npm registry', () => {
+  const packageJson = require('../package.json');
+  const lock = require('../package-lock.json');
+  assert.equal(lock.lockfileVersion, 3);
+  assert.equal(lock.name, packageJson.name);
+  assert.equal(lock.version, packageJson.version);
+  const root = lock.packages[''];
+  // npm ci refuses a lockfile whose root disagrees with package.json; this
+  // catches the drift here, before a release tag reaches the mirror.
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    assert.deepEqual(root[field] ?? {}, packageJson[field] ?? {}, field);
+  }
+  for (const [name, spec] of Object.entries({ ...packageJson.devDependencies })) {
+    const locked = lock.packages[`node_modules/${name}`];
+    assert.ok(locked, `${name} is locked`);
+    if (/^\d+\.\d+\.\d+$/.test(spec)) assert.equal(locked.version, spec, name);
+  }
+  for (const name of Object.keys(packageJson.peerDependencies ?? {})) {
+    assert.ok(lock.packages[`node_modules/${name}`], `peer ${name} is locked`);
+  }
+  for (const [location, entry] of Object.entries(lock.packages)) {
+    if (location === '' || entry.link) continue;
+    assert.match(entry.resolved ?? '', /^https:\/\/registry\.npmjs\.org\//, location);
+    assert.match(entry.integrity ?? '', /^sha512-/, location);
+  }
 });
 
 test('the monorepo mirrors the package and holds no n8n npm publish workflow', () => {

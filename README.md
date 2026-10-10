@@ -72,8 +72,14 @@ monorepo.
 
 To release, bump `version` in `package.json`, let the change reach the mirror,
 then push a tag `n8n-v<version>` (for example `n8n-v0.1.0`) to the mirror. The
-workflow checks the tag matches the package version and runs `n8n-node
-release`, which lints, builds and publishes with provenance. For the first
+workflow checks the tag matches the package version, installs from the
+committed `package-lock.json` with `npm ci --ignore-scripts`, lints, builds and
+packs with no credential, and then a separate job holding only the npm OIDC
+permission publishes that tarball with provenance (the npm token, when set, is
+written only in that final step). After changing dependencies here, refresh the
+lockfile with `npm install --package-lock-only --ignore-scripts` in a copy of
+this directory outside the pnpm workspace; `test/connector.test.cjs` fails
+when it drifts from `package.json`. For the first
 publish of the unclaimed `n8n-nodes-sigmora` name, store a granular npm token
 as the mirror's `NPM_TOKEN` secret. Then configure an npm trusted publisher
 with repository owner `mlsniperpro`, repository `n8n-nodes-sigmora` and
