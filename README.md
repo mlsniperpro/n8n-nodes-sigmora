@@ -60,27 +60,26 @@ event ID as an idempotency key for downstream systems where concurrent duplicate
 execution would be costly.
 
 Publishing requires ownership of the npm package name and n8n Creator Portal
-verification. `n8n-nodes-sigmora` is currently unclaimed, so its first public
-release must use a granular npm token that can create the package. Store that
-token as the `NPM_TOKEN` Actions secret. The GitHub repository named in
-`package.json` must be public before publishing because npm cannot generate the
-required provenance statement from a private repository. If this monorepo will
-remain private, publish the connector from a dedicated public repository and
-update the package repository field and trusted-publisher coordinates to match
-it exactly. Then run `pnpm release` in this directory. The package-scoped
-release configuration creates an n8n-only tag
-such as `n8n-v0.2.0`; the root workflow accepts only that exact prefix and checks
-that its version matches this package before publishing with provenance.
+verification. npm cannot generate the provenance statement n8n requires from a
+private repository, so this package publishes from its public mirror,
+`https://github.com/mlsniperpro/n8n-nodes-sigmora`. The monorepo workflow
+`.github/workflows/mirror-n8n.yml` pushes `git subtree split --prefix
+integrations/n8n` to that repository's `main` on every change here (it needs
+the `N8N_MIRROR_DEPLOY_KEY` secret: the private half of a write deploy key on
+the mirror, and skips with a notice when the secret is absent). The mirror runs
+`.github/workflows/publish.yml` from this directory, which is inert in the
+monorepo.
 
-After the first publish creates the package, configure npm trusted publishing
-with repository owner `mlsniperpro`, repository `sigmora-platform`, and workflow
-filename `publish-n8n.yml`; enable the trusted publisher's direct `npm publish`
-action because this workflow does not use npm's staged-publish flow. Then remove
-the `NPM_TOKEN` secret. Subsequent
-releases use GitHub OIDC without a long-lived npm credential. Keep `NPM_TOKEN`
-only as a fallback when trusted publishing is unavailable. Run a live
-subscription smoke test with a workspace API key before Creator Portal
-submission.
+To release, bump `version` in `package.json`, let the change reach the mirror,
+then push a tag `n8n-v<version>` (for example `n8n-v0.1.0`) to the mirror. The
+workflow checks the tag matches the package version and runs `n8n-node
+release`, which lints, builds and publishes with provenance. For the first
+publish of the unclaimed `n8n-nodes-sigmora` name, store a granular npm token
+as the mirror's `NPM_TOKEN` secret. Then configure an npm trusted publisher
+with repository owner `mlsniperpro`, repository `n8n-nodes-sigmora` and
+workflow filename `publish.yml`, enable its direct `npm publish` action, and
+remove `NPM_TOKEN`. Run a live subscription smoke test with a workspace API key
+before Creator Portal submission.
 
 The nodes intentionally omit an arbitrary API-request escape hatch. Typed
 operations preserve Sigmora's source scope validation, idempotency, proposal

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { createHmac } = require('node:crypto');
-const { readFileSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -227,21 +227,71 @@ test('trigger creates, deletes, and reactivates a webhook with retry-safe reques
   assert.equal(staticData.webhookSecret, firstSecret);
 });
 
-test('release tags and trusted-publisher repository are scoped to the n8n package', () => {
+// The package publishes from the public mirror (decision 8, S-W5-09): npm
+// refuses provenance from the private monorepo, so the monorepo only mirrors
+// integrations/n8n and the publish workflow lives inside the package, where it
+// is inert here and active at the mirror root.
+const MONOREPO_ROOT = path.join(__dirname, '..', '..', '..');
+const PUBLIC_MIRROR_URL = 'https://github.com/mlsniperpro/n8n-nodes-sigmora.git';
+
+test('release tags and the package repository point at the public n8n mirror', () => {
   const releaseConfig = require('../.release-it.json');
   const packageJson = require('../package.json');
-  const workflow = readFileSync(
-    path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'publish-n8n.yml'),
-    'utf8',
-  );
+  const workflow = readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'), 'utf8');
 
   assert.deepEqual(releaseConfig.git, {
     tagName: 'n8n-v${version}',
     tagMatch: 'n8n-v*',
   });
-  assert.equal(packageJson.repository.url, 'https://github.com/mlsniperpro/sigmora-platform.git');
+  assert.equal(packageJson.repository.url, PUBLIC_MIRROR_URL);
+  assert.doesNotMatch(packageJson.repository.url, /sigmora-platform/);
+  // The mirror root is this directory, so a monorepo subdirectory would make
+  // the provenance statement point at a path that does not exist.
+  assert.equal(packageJson.repository.directory, undefined);
   assert.match(workflow, /- "n8n-v\*\.\*\.\*"/);
   assert.match(workflow, /const expectedTag = `n8n-v\$\{packageJson\.version\}`/);
-  assert.match(workflow, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
   assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /npm run release/);
+});
+
+test('the monorepo mirrors the package and holds no n8n npm publish workflow', () => {
+  const workflowsDir = path.join(MONOREPO_ROOT, '.github', 'workflows');
+  assert.equal(existsSync(path.join(workflowsDir, 'publish-n8n.yml')), false);
+  for (const name of readdirSync(workflowsDir)) {
+    const text = readFileSync(path.join(workflowsDir, name), 'utf8');
+    if (/integrations\/n8n/.test(text)) {
+      assert.doesNotMatch(text, /NPM_TOKEN|NODE_AUTH_TOKEN|npm publish|pnpm release/, name);
+    }
+  }
+
+  const mirror = readFileSync(path.join(workflowsDir, 'mirror-n8n.yml'), 'utf8');
+  assert.match(mirror, /- main\n/);
+  assert.match(mirror, /- "integrations\/n8n\/\*\*"/);
+  assert.match(mirror, /git subtree split --prefix integrations\/n8n/);
+  assert.match(mirror, /secrets\.N8N_MIRROR_DEPLOY_KEY/);
+  assert.match(mirror, /::notice::N8N_MIRROR_DEPLOY_KEY is not set/);
+  assert.match(mirror, /git@github\.com:mlsniperpro\/n8n-nodes-sigmora\.git/);
+  assert.match(mirror, /^permissions:\n {2}contents: read\n/m);
+  assert.doesNotMatch(mirror, /contents: write|id-token: write/);
+});
+
+test('the package builds from its own directory, as the mirror root requires', () => {
+  const sources = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.ts')) sources.push(full);
+    }
+  };
+  walk(path.join(__dirname, '..', 'nodes'));
+  walk(path.join(__dirname, '..', 'credentials'));
+  const packageRoot = path.join(__dirname, '..');
+  for (const file of sources) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/from '(\.[^']+)'|require\('(\.[^']+)'\)/g)) {
+      const resolved = path.resolve(path.dirname(file), match[1] ?? match[2]);
+      assert.ok(resolved.startsWith(packageRoot + path.sep), `${file} imports ${resolved} outside the package`);
+    }
+  }
 });
