@@ -64,9 +64,11 @@ verification. npm cannot generate the provenance statement n8n requires from a
 private repository, so this package publishes from its public mirror,
 `https://github.com/mlsniperpro/n8n-nodes-sigmora`. The monorepo workflow
 `.github/workflows/mirror-n8n.yml` pushes `git subtree split --prefix
-integrations/n8n` to that repository's `main` on every change here (it needs
-the `N8N_MIRROR_DEPLOY_KEY` secret: the private half of a write deploy key on
-the mirror, and skips with a notice when the secret is absent). The mirror runs
+integrations/n8n` to that repository's `main` on every change here, from
+`main` only (it needs the `N8N_MIRROR_DEPLOY_KEY` secret, the private half of a
+write deploy key on the mirror, stored in the `n8n-mirror` GitHub environment
+whose deployment branches are limited to `main`; it skips with a notice when
+the secret is absent). The mirror runs
 `.github/workflows/publish.yml` from this directory, which is inert in the
 monorepo.
 

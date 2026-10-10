@@ -343,12 +343,25 @@ test('the monorepo mirrors the package and holds no n8n npm publish workflow', (
   const mirror = readFileSync(path.join(workflowsDir, 'mirror-n8n.yml'), 'utf8');
   assert.match(mirror, /- main\n/);
   assert.match(mirror, /- "integrations\/n8n\/\*\*"/);
-  assert.match(mirror, /git subtree split --prefix integrations\/n8n/);
-  assert.match(mirror, /secrets\.N8N_MIRROR_DEPLOY_KEY/);
-  assert.match(mirror, /::notice::N8N_MIRROR_DEPLOY_KEY is not set/);
-  assert.match(mirror, /git@github\.com:mlsniperpro\/n8n-nodes-sigmora\.git/);
   assert.match(mirror, /^permissions:\n {2}contents: read\n/m);
-  assert.doesNotMatch(mirror, /contents: write|id-token: write/);
+  assert.doesNotMatch(mirror, /contents: write|id-token: write|secrets/);
+  // W5R1-MONEY-AUTH-02: only main reaches the deploy key, which lives in the
+  // `n8n-mirror` environment (deployment branches: main), not the repository.
+  assert.match(mirror, /^ {4}if: github\.ref == 'refs\/heads\/main'\n {4}uses: \.\/\.github\/workflows\/mirror-subtree\.yml\n/m);
+  assert.match(mirror, /^ {6}prefix: integrations\/n8n\n/m);
+  assert.match(mirror, /^ {6}remote: git@github\.com:mlsniperpro\/n8n-nodes-sigmora\.git\n/m);
+  assert.match(mirror, /^ {6}environment: n8n-mirror\n/m);
+  assert.match(mirror, /^ {6}deploy_key_secret: N8N_MIRROR_DEPLOY_KEY\n/m);
+
+  const subtree = readFileSync(path.join(workflowsDir, 'mirror-subtree.yml'), 'utf8');
+  assert.match(subtree, /^on:\n {2}workflow_call:\n/m);
+  assert.match(subtree, /^ {4}if: github\.ref == 'refs\/heads\/main'\n/m);
+  assert.match(subtree, /^ {4}environment: \$\{\{ inputs\.environment \}\}\n/m);
+  assert.match(subtree, /secrets\[inputs\.deploy_key_secret\]/);
+  assert.match(subtree, /::notice::\$\{DEPLOY_KEY_SECRET\} is not set/);
+  assert.match(subtree, /git subtree split --prefix "\$MIRROR_PREFIX"/);
+  assert.match(subtree, /StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(subtree, /--force|\+mirror-split|contents: write|id-token: write/);
 });
 
 test('the package builds from its own directory, as the mirror root requires', () => {
