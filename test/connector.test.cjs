@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { createHmac } = require('node:crypto');
-const { readFileSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync } = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -227,21 +227,160 @@ test('trigger creates, deletes, and reactivates a webhook with retry-safe reques
   assert.equal(staticData.webhookSecret, firstSecret);
 });
 
-test('release tags and trusted-publisher repository are scoped to the n8n package', () => {
+// The package publishes from the public mirror (decision 8, S-W5-09): npm
+// refuses provenance from the private monorepo, so the monorepo only mirrors
+// integrations/n8n and the publish workflow lives inside the package, where it
+// is inert here and active at the mirror root.
+const MONOREPO_ROOT = path.join(__dirname, '..', '..', '..');
+const PUBLIC_MIRROR_URL = 'https://github.com/mlsniperpro/n8n-nodes-sigmora.git';
+
+test('release tags and the package repository point at the public n8n mirror', () => {
   const releaseConfig = require('../.release-it.json');
   const packageJson = require('../package.json');
-  const workflow = readFileSync(
-    path.join(__dirname, '..', '..', '..', '.github', 'workflows', 'publish-n8n.yml'),
-    'utf8',
-  );
+  const workflow = readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'), 'utf8');
 
   assert.deepEqual(releaseConfig.git, {
     tagName: 'n8n-v${version}',
     tagMatch: 'n8n-v*',
   });
-  assert.equal(packageJson.repository.url, 'https://github.com/mlsniperpro/sigmora-platform.git');
+  assert.equal(packageJson.repository.url, PUBLIC_MIRROR_URL);
+  assert.doesNotMatch(packageJson.repository.url, /sigmora-platform/);
+  // The mirror root is this directory, so a monorepo subdirectory would make
+  // the provenance statement point at a path that does not exist.
+  assert.equal(packageJson.repository.directory, undefined);
   assert.match(workflow, /- "n8n-v\*\.\*\.\*"/);
   assert.match(workflow, /const expectedTag = `n8n-v\$\{packageJson\.version\}`/);
-  assert.match(workflow, /NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}/);
   assert.match(workflow, /id-token: write/);
+});
+
+// Splits a workflow into its jobs and each job into its steps, by indentation
+// (the repository adds no YAML dependency for this).
+function workflowJobs(text) {
+  const body = text.slice(text.indexOf('\njobs:\n') + 7);
+  const jobs = {};
+  for (const block of body.split(/^(?= {2}[A-Za-z][\w-]*:\n)/m)) {
+    const name = block.match(/^ {2}([A-Za-z][\w-]*):\n/)?.[1];
+    if (!name) continue;
+    const stepsAt = block.indexOf('\n    steps:\n');
+    jobs[name] = {
+      head: stepsAt === -1 ? block : block.slice(0, stepsAt),
+      steps: stepsAt === -1 ? [] : block.slice(stepsAt).split(/^ {6}- /m).slice(1),
+    };
+  }
+  return jobs;
+}
+
+test('the mirror publish runs no unlocked install and no dependency code beside publish credentials', () => {
+  const workflow = readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'), 'utf8');
+  const jobs = workflowJobs(workflow);
+  // Workflow-level permissions grant no OIDC token; only the publish job does.
+  assert.match(workflow, /^permissions:\n {2}contents: read\n/m);
+  assert.doesNotMatch(workflow, /npm install|npm i\b|npm run release/);
+
+  const credentialed = Object.entries(jobs).filter(([, job]) => /id-token: write/.test(job.head));
+  assert.deepEqual(credentialed.map(([name]) => name), ['publish']);
+  for (const [name, job] of Object.entries(jobs)) {
+    if (name === 'publish') continue;
+    assert.doesNotMatch(job.head + job.steps.join(''), /id-token|NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./, name);
+  }
+
+  const build = jobs.build.steps.join('');
+  assert.match(build, /run: npm ci --ignore-scripts/);
+  const order = ['npm ci --ignore-scripts', 'npm run lint', 'npm run build', 'npm pack --ignore-scripts'].map((command) =>
+    build.indexOf(command),
+  );
+  assert.ok(order.every((at, index) => at !== -1 && (index === 0 || at > order[index - 1])), `build order ${order}`);
+  assert.match(jobs.publish.head, /needs: build/);
+
+  // The publish job installs nothing and runs no package script: it publishes
+  // the tarball the unprivileged build job packed, and the npm token exists
+  // only in its final step.
+  const publish = jobs.publish.steps;
+  assert.doesNotMatch(publish.join(''), /npm ci|npm run|npm test|actions\/checkout/);
+  const tokenSteps = publish.filter((step) => /NPM_TOKEN/.test(step));
+  assert.deepEqual(tokenSteps, [publish.at(-1)]);
+  assert.match(publish.at(-1), /npm publish "\$tarball" --provenance --access public --ignore-scripts/);
+  for (const uses of workflow.match(/uses: \S+/g) ?? []) assert.match(uses, /@[0-9a-f]{40}$/, `${uses} must pin a commit`);
+});
+
+test('the committed npm lockfile is fresh for package.json and resolves only from the npm registry', () => {
+  const packageJson = require('../package.json');
+  const lock = require('../package-lock.json');
+  assert.equal(lock.lockfileVersion, 3);
+  assert.equal(lock.name, packageJson.name);
+  assert.equal(lock.version, packageJson.version);
+  const root = lock.packages[''];
+  // npm ci refuses a lockfile whose root disagrees with package.json; this
+  // catches the drift here, before a release tag reaches the mirror.
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    assert.deepEqual(root[field] ?? {}, packageJson[field] ?? {}, field);
+  }
+  for (const [name, spec] of Object.entries({ ...packageJson.devDependencies })) {
+    const locked = lock.packages[`node_modules/${name}`];
+    assert.ok(locked, `${name} is locked`);
+    if (/^\d+\.\d+\.\d+$/.test(spec)) assert.equal(locked.version, spec, name);
+  }
+  for (const name of Object.keys(packageJson.peerDependencies ?? {})) {
+    assert.ok(lock.packages[`node_modules/${name}`], `peer ${name} is locked`);
+  }
+  for (const [location, entry] of Object.entries(lock.packages)) {
+    if (location === '' || entry.link) continue;
+    assert.match(entry.resolved ?? '', /^https:\/\/registry\.npmjs\.org\//, location);
+    assert.match(entry.integrity ?? '', /^sha512-/, location);
+  }
+});
+
+test('the monorepo mirrors the package and holds no n8n npm publish workflow', () => {
+  const workflowsDir = path.join(MONOREPO_ROOT, '.github', 'workflows');
+  assert.equal(existsSync(path.join(workflowsDir, 'publish-n8n.yml')), false);
+  for (const name of readdirSync(workflowsDir)) {
+    const text = readFileSync(path.join(workflowsDir, name), 'utf8');
+    if (/integrations\/n8n/.test(text)) {
+      assert.doesNotMatch(text, /NPM_TOKEN|NODE_AUTH_TOKEN|npm publish|pnpm release/, name);
+    }
+  }
+
+  const mirror = readFileSync(path.join(workflowsDir, 'mirror-n8n.yml'), 'utf8');
+  assert.match(mirror, /- main\n/);
+  assert.match(mirror, /- "integrations\/n8n\/\*\*"/);
+  assert.match(mirror, /^permissions:\n {2}contents: read\n/m);
+  assert.doesNotMatch(mirror, /contents: write|id-token: write|secrets/);
+  // W5R1-MONEY-AUTH-02: only main reaches the deploy key, which lives in the
+  // `n8n-mirror` environment (deployment branches: main), not the repository.
+  assert.match(mirror, /^ {4}if: github\.ref == 'refs\/heads\/main'\n {4}uses: \.\/\.github\/workflows\/mirror-subtree\.yml\n/m);
+  assert.match(mirror, /^ {6}prefix: integrations\/n8n\n/m);
+  assert.match(mirror, /^ {6}remote: git@github\.com:mlsniperpro\/n8n-nodes-sigmora\.git\n/m);
+  assert.match(mirror, /^ {6}environment: n8n-mirror\n/m);
+  assert.match(mirror, /^ {6}deploy_key_secret: N8N_MIRROR_DEPLOY_KEY\n/m);
+
+  const subtree = readFileSync(path.join(workflowsDir, 'mirror-subtree.yml'), 'utf8');
+  assert.match(subtree, /^on:\n {2}workflow_call:\n/m);
+  assert.match(subtree, /^ {4}if: github\.ref == 'refs\/heads\/main'\n/m);
+  assert.match(subtree, /^ {4}environment: \$\{\{ inputs\.environment \}\}\n/m);
+  assert.match(subtree, /secrets\[inputs\.deploy_key_secret\]/);
+  assert.match(subtree, /::notice::\$\{DEPLOY_KEY_SECRET\} is not set/);
+  assert.match(subtree, /git subtree split --prefix "\$MIRROR_PREFIX"/);
+  assert.match(subtree, /StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(subtree, /--force|\+mirror-split|contents: write|id-token: write/);
+});
+
+test('the package builds from its own directory, as the mirror root requires', () => {
+  const sources = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.ts')) sources.push(full);
+    }
+  };
+  walk(path.join(__dirname, '..', 'nodes'));
+  walk(path.join(__dirname, '..', 'credentials'));
+  const packageRoot = path.join(__dirname, '..');
+  for (const file of sources) {
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/from '(\.[^']+)'|require\('(\.[^']+)'\)/g)) {
+      const resolved = path.resolve(path.dirname(file), match[1] ?? match[2]);
+      assert.ok(resolved.startsWith(packageRoot + path.sep), `${file} imports ${resolved} outside the package`);
+    }
+  }
 });

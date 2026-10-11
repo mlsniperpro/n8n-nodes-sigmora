@@ -14,8 +14,7 @@
   "author": { "name": "Sigmora", "email": "support@sigmora.org" },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mlsniperpro/sigmora-platform.git",
-    "directory": "integrations/n8n"
+    "url": "https://github.com/mlsniperpro/n8n-nodes-sigmora.git"
   },
   "scripts": {
     "build": "n8n-node build",
