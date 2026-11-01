@@ -341,8 +341,10 @@ test('the monorepo mirrors the package and holds no n8n npm publish workflow', (
   }
 
   const mirror = readFileSync(path.join(workflowsDir, 'mirror-n8n.yml'), 'utf8');
-  assert.match(mirror, /- main\n/);
-  assert.match(mirror, /- "integrations\/n8n\/\*\*"/);
+  // Manual only (GitHub Actions is for deployment only): no push, PR or
+  // schedule trigger; run it after a change under integrations/n8n lands.
+  assert.match(mirror, /^on:\n(?:\s*#.*\n)*\s+workflow_dispatch:/m);
+  assert.doesNotMatch(mirror, /^\s+(?:push|pull_request|schedule):/m);
   assert.match(mirror, /^permissions:\n {2}contents: read\n/m);
   assert.doesNotMatch(mirror, /contents: write|id-token: write|secrets/);
   // W5R1-MONEY-AUTH-02: only main reaches the deploy key, which lives in the
