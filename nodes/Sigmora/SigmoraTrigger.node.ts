@@ -15,6 +15,7 @@ import { verifyWebhookSignature } from './webhook-signature';
 
 export const eventOptions = [
 	{ name: 'Job Awaiting Approval', value: 'job.awaiting_approval' },
+	{ name: 'Job Approval Resolved', value: 'job.approval_resolved' },
 	{ name: 'Job Progressed', value: 'job.progressed' },
 	{ name: 'Job Completed', value: 'job.completed' },
 	{ name: 'Job Failed', value: 'job.failed' },
