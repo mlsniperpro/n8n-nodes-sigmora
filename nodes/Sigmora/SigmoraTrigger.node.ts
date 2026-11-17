@@ -23,6 +23,10 @@ export const eventOptions = [
 	{ name: 'Artifact Ready', value: 'artifact.ready' },
 	{ name: 'Publish Completed', value: 'publish.completed' },
 	{ name: 'Publish Failed', value: 'publish.failed' },
+	{ name: 'Render Completed', value: 'render.completed' },
+	{ name: 'Clip Ready', value: 'clip.ready' },
+	{ name: 'Post Published', value: 'publish.done' },
+	{ name: 'Needs Approval', value: 'needs_approval' },
 ];
 
 function normalizedEvents(events: string[]): string[] {
@@ -63,7 +67,7 @@ export class SigmoraTrigger implements INodeType {
 		group: ['trigger'],
 		version: 1,
 		subtitle: '={{$parameter["events"].join(", ")}}',
-		description: 'Starts a workflow from a signed Sigmora job, artifact, or publishing event',
+		description: 'Starts a workflow from a signed Sigmora job, artifact, publishing, or agent event',
 		defaults: { name: 'Sigmora Trigger' },
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
@@ -78,7 +82,7 @@ export class SigmoraTrigger implements INodeType {
 				default: ['job.completed', 'job.failed', 'artifact.ready'],
 				required: true,
 				description:
-					'Job events cover footage edits and media-analysis jobs created in Sigmora. Artifact Ready is footage-edit only. Publish events come from Sigmora’s publishing rail. Poll Get Job for prose-to-video renders.',
+					'Job events cover footage edits and media-analysis jobs created in Sigmora. Artifact Ready is footage-edit only. Publish events come from Sigmora’s publishing rail. Render Completed, Clip Ready, Post Published and Needs Approval are agent events: each says one thing once, with a link to read the result, and needs Agent events turned on in Sigmora Labs. Poll Get Job for prose-to-video renders.',
 			},
 		],
 	};
