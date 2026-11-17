@@ -23,6 +23,20 @@ retrieves them. **Get Workflow Run** exposes durable execution state.
 remains subject to Sigmora destination and approval policy. Publishing
 completion/failure events continue to arrive through the signed trigger.
 
+The trigger also offers the four agent events: **Render Completed**
+(`render.completed`, a video finished and its file can be downloaded), **Clip
+Ready** (`clip.ready`, a short clip of a footage edit finished), **Post
+Published** (`publish.done`, a queued post was published) and **Needs
+Approval** (`needs_approval`, a footage edit's cuts or a run's ask wait for a
+person). Sigmora sends them beside the events above from the same change, but
+each says one thing once with one `eventId`, so a render that goes ready and
+then published starts the workflow once. `data.links.job` is the API path to
+read (its `artifacts.download` is a freshly signed link), `data.links.approval`
+opens a run's ask, and a footage-edit output carries `data.outputKind` (`short`
+or `long`). They are a Labs beta: with Agent events off for the workspace,
+Sigmora refuses a subscription that names any of them (403), so activating the
+workflow fails until it is turned on.
+
 An import returns a project asset `id` and a media `contentId`. If it is still
 processing, use **Get Ingest Status** with the project asset ID until `ready` is true;
 pass the resulting `contentId` to **Source Content IDs** when starting an edit.
@@ -71,6 +85,9 @@ whose deployment branches are limited to `main`; it skips with a notice when
 the secret is absent). The mirror runs
 `.github/workflows/publish.yml` from this directory, which is inert in the
 monorepo.
+
+Changes: 0.2.0 adds the four agent events to the Sigmora Trigger; 0.1.0 was
+the first version.
 
 To release, bump `version` in `package.json`, let the change reach the mirror,
 then push a tag `n8n-v<version>` (for example `n8n-v0.1.0`) to the mirror. The

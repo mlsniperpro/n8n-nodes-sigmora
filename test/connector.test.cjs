@@ -227,6 +227,45 @@ test('trigger creates, deletes, and reactivates a webhook with retry-safe reques
   assert.equal(staticData.webhookSecret, firstSecret);
 });
 
+test('trigger delivers a signed clip.ready once and drops its retry and unselected events', async () => {
+  const fixtures = require('../../shared/fixtures/agent-events.json');
+  assert.equal(eventOptions.find((option) => option.value === 'clip.ready')?.name, 'Clip Ready');
+  const secret = 'c'.repeat(64);
+  const staticData = { subscriptionId: 'sub_1', webhookSecret: secret };
+  const deliver = (body) => {
+    const rawBody = JSON.stringify(body);
+    const timestamp = new Date().toISOString();
+    const statuses = [];
+    const context = {
+      getRequestObject: () => ({ rawBody: Buffer.from(rawBody) }),
+      getHeaderData: () => ({
+        'x-sigmora-timestamp': timestamp,
+        'x-sigmora-signature': signWebhook(secret, timestamp, rawBody),
+      }),
+      getWorkflowStaticData: () => staticData,
+      getBodyData: () => JSON.parse(rawBody),
+      getNodeParameter: () => ['clip.ready', 'needs_approval'],
+      getResponseObject: () => ({ status: (code) => ({ send: () => ({ end: () => statuses.push(code) }) }) }),
+      helpers: { returnJsonArray: (items) => items.map((json) => ({ json })) },
+    };
+    return new SigmoraTrigger().webhook.call(context);
+  };
+
+  const clip = fixtures['clip.ready'];
+  const first = await deliver(clip);
+  assert.deepEqual(first.workflowData, [[{ json: clip }]]);
+  assert.equal(first.workflowData[0][0].json.data.outputKind, 'short');
+  assert.equal(first.workflowData[0][0].json.data.links.job, '/v1/jobs/job_clip_example');
+  // A retry carries the same eventId and starts nothing.
+  assert.deepEqual(await deliver(clip), {});
+  assert.ok(staticData.seenEventIds.includes(clip.eventId));
+  // The same job's render.completed is a different event, but not one this node chose.
+  assert.deepEqual(await deliver(fixtures['render.completed']), {});
+  // A run's ask comes through with its approval link.
+  const ask = await deliver(fixtures['needs_approval.run']);
+  assert.match(ask.workflowData[0][0].json.data.links.approval, /^https:\/\//);
+});
+
 // The package publishes from the public mirror (decision 8, S-W5-09): npm
 // refuses provenance from the private monorepo, so the monorepo only mirrors
 // integrations/n8n and the publish workflow lives inside the package, where it
