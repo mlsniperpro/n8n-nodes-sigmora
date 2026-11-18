@@ -21,7 +21,7 @@
           "conditions": [
             {
               "id": "http-asset-ready-condition",
-              "leftValue": "={{$json.ready === true || ($json.asset?.status === 'ready' && $json.asset?.ingestStatus === 'active')}}",
+              "leftValue": "={{$json.ready === true}}",
               "rightValue": "",
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -48,7 +48,7 @@
           "conditions": [
             {
               "id": "http-asset-retryable-condition",
-              "leftValue": "={{$json.retryable === true || $json.asset?.status === 'processing' || $json.asset?.ingestStatus === 'pending'}}",
+              "leftValue": "={{$json.retryable === true}}",
               "rightValue": "",
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -88,7 +88,7 @@
     },
     {
       "parameters": {
-        "errorMessage": "Sigmora could not make the imported asset ready for editing."
+        "errorMessage": "={{'Sigmora could not make the imported asset ready for editing: ' + ($json.error || $json.status)}}"
       },
       "id": "http-ingest-failed",
       "name": "Stop on ingest failure",
@@ -123,11 +123,11 @@
         "sendHeaders": true,
         "headerParameters": { "parameters": [
           { "name": "Authorization", "value": "={{'Bearer ' + $env.SIGMORA_API_KEY}}" },
-          { "name": "Idempotency-Key", "value": "={{'edit:' + $('Import media over HTTP').item.json.asset.id}}" }
+          { "name": "Idempotency-Key", "value": "={{'edit:' + $('Get ingest status over HTTP').item.json.assetId}}" }
         ] },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ projectId: $('Import media over HTTP').item.json.projectId, shootId: $('Import media over HTTP').item.json.asset.id, clipIds: [$json.contentId || $json.asset.contentId], title: $('Import media over HTTP').item.json.asset.title, makeLong: true, shortsCount: 0, reviewCuts: false }) }}",
+        "jsonBody": "={{ JSON.stringify({ projectId: $('Import media over HTTP').item.json.projectId, shootId: $('Get ingest status over HTTP').item.json.assetId, clipIds: [$('Get ingest status over HTTP').item.json.contentId], title: $('Import media over HTTP').item.json.asset.title, makeLong: true, shortsCount: 0, reviewCuts: false }) }}",
         "options": {}
       },
       "id": "http-edit",
@@ -139,7 +139,7 @@
   ],
   "connections": {
     "Run workflow": { "main": [[{ "node": "Import media over HTTP", "type": "main", "index": 0 }]] },
-    "Import media over HTTP": { "main": [[{ "node": "Asset ready?", "type": "main", "index": 0 }]] },
+    "Import media over HTTP": { "main": [[{ "node": "Wait for ingest", "type": "main", "index": 0 }]] },
     "Asset ready?": {
       "main": [
         [{ "node": "Start footage edit over HTTP", "type": "main", "index": 0 }],

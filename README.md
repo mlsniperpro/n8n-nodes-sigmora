@@ -37,9 +37,12 @@ or `long`). They are a Labs beta: with Agent events off for the workspace,
 Sigmora refuses a subscription that names any of them (403), so activating the
 workflow fails until it is turned on.
 
-An import returns a project asset `id` and a media `contentId`. If it is still
-processing, use **Get Ingest Status** with the project asset ID until `ready` is true;
-pass the resulting `contentId` to **Source Content IDs** when starting an edit.
+**Import From URL** returns at once, before the file is stored, because storing
+it can take a few minutes. Its `id` is an import id (`imp_...`) while the file is
+being stored. Use **Get Ingest Status** with that `id`, after a Wait node, until
+`ready` is true; then pass the `assetId` and `contentId` from that node to later
+steps, such as **Source Content IDs** when starting an edit. If `terminal` is
+true and `ready` is false, the import failed and `error` says why.
 
 **Start Footage Edit** returns its orchestration parent as `parentJobId`, every
 artifact-producing render as `childJobIds`, and the first child as `jobId`.

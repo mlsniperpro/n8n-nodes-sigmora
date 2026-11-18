@@ -54,8 +54,20 @@ export const properties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['asset'] } },
 		options: [
 			{ name: 'Export Transcript', value: 'exportTranscript', action: 'Export a transcript' },
-			{ name: 'Get Ingest Status', value: 'getStatus', action: 'Get asset ingest status' },
-			{ name: 'Import From URL', value: 'import', action: 'Import media from a URL' },
+			{
+				name: 'Get Ingest Status',
+				value: 'getStatus',
+				action: 'Get asset ingest status',
+				description:
+					'Check whether an imported asset is ready. Takes the ID Import From URL returned; once ready, returns the asset ID and content ID.',
+			},
+			{
+				name: 'Import From URL',
+				value: 'import',
+				action: 'Import media from a URL',
+				description:
+					'Start importing a public HTTPS URL and return at once. Follow it with Get Ingest Status until the asset is ready.',
+			},
 		],
 		default: 'import',
 	},
@@ -213,6 +225,8 @@ export const properties: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: { show: { resource: ['asset'], operation: ['getStatus', 'exportTranscript'] } },
+		description:
+			'The asset ID, or for Get Ingest Status the ID Import From URL returned. Check again until Ready is true; if Terminal is true and Ready is false, the import failed and Error says why.',
 	},
 	{
 		displayName: 'Segment Limit',
@@ -265,7 +279,7 @@ export const properties: INodeProperties[] = [
 		default: '',
 		required: true,
 		displayOptions: { show: { resource: ['job'], operation: ['startEdit'] } },
-			description: 'Comma-separated content IDs returned by Import From URL or Get Ingest Status',
+			description: 'Comma-separated content IDs from Get Ingest Status once it says the asset is ready',
 	},
 	{
 		displayName: 'Title',

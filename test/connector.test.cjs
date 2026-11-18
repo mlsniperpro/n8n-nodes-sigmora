@@ -123,6 +123,41 @@ test('asset ingest status uses the project asset ID and yields the content ID', 
     ready: true,
   }, {});
   assert.equal(output[0].contentId, 'content_1');
+  assert.equal(output[0].id, 'asset_1');
+});
+
+test('ingest status answers for the import id while the file is stored', () => {
+  const request = buildRequest('asset.getStatus', { projectId: 'prj_1', assetId: 'imp_abc' });
+  assert.equal(request.path, '/v1/assets/imp_abc/ingest');
+  const [running] = transformResponse('asset.getStatus', {
+    success: true,
+    projectId: 'prj_1',
+    assetId: null,
+    importId: 'imp_abc',
+    contentId: null,
+    status: 'processing',
+    ingestStatus: 'pending',
+    ready: false,
+    terminal: false,
+    retryable: true,
+  }, {});
+  assert.equal(running.id, 'imp_abc');
+  assert.equal(running.assetId, null);
+  assert.equal(running.ready, false);
+});
+
+test('import returns the 202 reply at once and its help points at Get Ingest Status', () => {
+  const [asset] = transformResponse('asset.import', {
+    success: true,
+    projectId: 'prj_1',
+    importId: 'imp_abc',
+    asset: { id: 'imp_abc', importId: 'imp_abc', projectId: 'prj_1', title: 'Recording', status: 'processing', ingestStatus: 'pending', ready: false },
+  }, {});
+  assert.equal(asset.id, 'imp_abc');
+  assert.equal(asset.status, 'processing');
+  const operations = JSON.stringify(require('../dist/nodes/Sigmora/descriptions.js').properties);
+  assert.match(operations, /return at once/);
+  assert.match(operations, /Takes the ID Import From URL returned/);
 });
 
 test('capability listing reads the canonical API capabilities collection', () => {
@@ -157,8 +192,16 @@ test('native and HTTP templates wait for ingest readiness and edit the content I
     assert.ok(template.nodes.some((node) => node.name === 'Asset ready?'));
     assert.ok(template.nodes.some((node) => /Get ingest status/.test(node.name)));
     const edit = template.nodes.find((node) => /Start footage edit/.test(node.name));
-    assert.match(JSON.stringify(edit.parameters), /contentId/);
-    assert.doesNotMatch(JSON.stringify(edit.parameters), /clipIds[^]*asset\.id/);
+    const status = template.nodes.find((node) => /Get ingest status/.test(node.name));
+    // Import answers at once and is never ready: it goes straight to the wait,
+    // and the edit takes assetId/contentId from the ingest status node.
+    const importNode = template.nodes.find((node) => /Import media/.test(node.name));
+    assert.equal(template.connections[importNode.name].main[0][0].node, 'Wait for ingest');
+    const editParameters = JSON.stringify(edit.parameters);
+    assert.ok(editParameters.includes(`$('${status.name}').item.json.contentId`));
+    assert.ok(editParameters.includes(`$('${status.name}').item.json.assetId`));
+    assert.doesNotMatch(editParameters, /asset\.id/);
+    assert.doesNotMatch(editParameters, /\$\('Import media[^']*'\)\.item\.json\.id/);
   }
 });
 

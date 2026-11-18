@@ -36,7 +36,7 @@
           "conditions": [
             {
               "id": "asset-ready-condition",
-              "leftValue": "={{$json.ready === true || ($json.status === 'ready' && $json.ingestStatus === 'active')}}",
+              "leftValue": "={{$json.ready === true}}",
               "rightValue": "",
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -63,7 +63,7 @@
           "conditions": [
             {
               "id": "asset-retryable-condition",
-              "leftValue": "={{$json.retryable === true || $json.status === 'processing' || $json.ingestStatus === 'pending'}}",
+              "leftValue": "={{$json.retryable === true}}",
               "rightValue": "",
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -101,7 +101,7 @@
     },
     {
       "parameters": {
-        "errorMessage": "Sigmora could not make the imported asset ready for editing."
+        "errorMessage": "={{'Sigmora could not make the imported asset ready for editing: ' + ($json.error || $json.status)}}"
       },
       "id": "ingest-failed",
       "name": "Stop on ingest failure",
@@ -113,14 +113,14 @@
       "parameters": {
         "resource": "job",
         "operation": "startEdit",
-        "projectId": "={{$json.projectId}}",
-        "shootId": "={{$('Import media').item.json.id}}",
-        "clipIds": "={{$json.contentId}}",
+        "projectId": "={{$('Get ingest status').item.json.projectId}}",
+        "shootId": "={{$('Get ingest status').item.json.assetId}}",
+        "clipIds": "={{$('Get ingest status').item.json.contentId}}",
         "title": "={{$('Import media').item.json.title}}",
         "makeLong": true,
         "shortsCount": 0,
         "reviewCuts": false,
-        "idempotencyKey": "={{'edit:' + $('Import media').item.json.id}}"
+        "idempotencyKey": "={{'edit:' + $('Get ingest status').item.json.assetId}}"
       },
       "id": "sigmora-edit",
       "name": "Start footage edit",
@@ -131,7 +131,7 @@
   ],
   "connections": {
     "Run workflow": { "main": [[{ "node": "Import media", "type": "main", "index": 0 }]] },
-    "Import media": { "main": [[{ "node": "Asset ready?", "type": "main", "index": 0 }]] },
+    "Import media": { "main": [[{ "node": "Wait for ingest", "type": "main", "index": 0 }]] },
     "Asset ready?": {
       "main": [
         [{ "node": "Start footage edit", "type": "main", "index": 0 }],

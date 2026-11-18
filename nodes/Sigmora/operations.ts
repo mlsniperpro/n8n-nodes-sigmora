@@ -273,7 +273,9 @@ export function transformResponse(
 		case 'asset.import':
 			return [response.asset as IDataObject];
 		case 'asset.getStatus':
-			return [{ ...response, id: response.assetId }];
+			// While an import is still storing its file there is no asset yet
+			// (`assetId` is null), so the import id stands in as the item id.
+			return [{ ...response, id: response.assetId ?? response.importId ?? null }];
 		case 'job.startEdit':
 		case 'job.approveEdit':
 			return [normalizeVideoEditResponse(response)];
